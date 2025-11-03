@@ -411,7 +411,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TruthLens API", lifespan=lifespan)
-api_router = APIRouter(prefix="/api")
+api_router = APIRouter()
 security = HTTPBearer()
 
 
