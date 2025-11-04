@@ -118,13 +118,17 @@ class AnalysisResult(BaseModel):
     content: str
     content_type: str
     # Updated fields to match your refactored model
-    credibilityScore: int
-    statusLabel: str
+    
+    # --- FIX: Add default values for required fields that might be missing in old DB entries ---
+    credibilityScore: int = Field(default=50) # Default score for old entries
+    statusLabel: str = Field(default="Legacy/Incomplete Analysis") # Default label
     confidence: float
-    analysisReasoning: str
+    analysisReasoning: str = Field(default="Reasoning not stored for this older analysis format.") # Default reasoning
+    # ------------------------------------------------------------------------------------------
+    
     education_tips: List[str]
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    sourceLinks: List[SourceLink]  # <-- THIS IS THE FIX
+    sourceLinks: Optional[List[SourceLink]] = Field(default_factory=list)
 
 
 
@@ -552,8 +556,30 @@ async def fact_check_endpoint(req: FactCheckRequest, user: Optional[User] = Depe
 
 @api_router.get("/history", response_model=HistoryResponse, summary="Get user's analysis history")
 async def get_analysis_history(user: User = Depends(get_current_user), limit: int = 20, skip: int = 0):
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    """
+    Retrieves the authenticated user's past analysis results, paginated.
+    """
+    analyses_ref = db.collection("analyses")
+    
+    # Query for the total count for this user
+    count_query = analyses_ref.where(field_path="user_id", op_string="==", value=user.id)
+    total_count_agg = await count_query.count().get()
+    # The result is a list of lists, get the first item's value
+    total_count = total_count_agg[0][0].value
+    
+    # Query for the paginated results
+    query = analyses_ref.where(field_path="user_id", op_string="==", value=user.id) \
+                        .order_by("timestamp", direction=firestore.Query.DESCENDING) \
+                        .limit(limit) \
+                        .offset(skip)
+    
+    analyses_docs_stream = query.stream()
+    analyses = [AnalysisResult(**doc.to_dict()) async for doc in analyses_docs_stream]
+    
+    return HistoryResponse(
+        analyses=analyses,
+        total_count=total_count
+    )
 
 
 # 1. Create the query
